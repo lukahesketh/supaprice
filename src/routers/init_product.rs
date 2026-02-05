@@ -17,11 +17,12 @@ pub async fn init_product(
     Json(product_init): Json<Product>,
 ) -> Result<Json<ProductIdResponse>, StatusCode> {
     let result = query(
-        "INSERT INTO products (store_id, external_id, baseline_price, min_price, max_price, sensitivity, stock, update_interval_minutes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id"
+        "INSERT INTO products (store_id, external_id, baseline_price, current_price, min_price, max_price, sensitivity, stock, update_interval_minutes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id"
     )
     .bind(&product_init.store_id)
     .bind(&product_init.external_id)
     .bind(&product_init.baseline_price)
+    .bind(&product_init.current_price)
     .bind(&product_init.min_price)
     .bind(&product_init.max_price)
     .bind(&product_init.sensitivity)

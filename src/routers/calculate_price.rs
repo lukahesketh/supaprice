@@ -5,14 +5,12 @@ use tokio::time::{Duration, interval};
 
 pub async fn calculate_price(pool: PgPool) {
     let mut interval = interval(Duration::from_secs(150));
-
     loop {
         interval.tick().await;
         let products = query("SELECT id, stock, update_interval_minutes, current_price, baseline_price, min_price, max_price, sensitivity FROM products WHERE last_price_update IS NULL OR last_price_update + (update_interval_minutes || ' minutes')::interval <= NOW()")
             .fetch_all(&pool)
             .await
             .unwrap();
-
         for product in products {
             let id: i32 = product.try_get("id").unwrap();
             let stock: i32 = product.try_get("stock").unwrap();
@@ -22,7 +20,6 @@ pub async fn calculate_price(pool: PgPool) {
             let min_price: f64 = product.try_get("min_price").unwrap();
             let max_price: f64 = product.try_get("max_price").unwrap();
             let sensitivity: f64 = product.try_get("sensitivity").unwrap();
-
             edit_price(
                 &pool,
                 id,
@@ -48,11 +45,11 @@ pub async fn edit_price(
     baseline_price: f64,
     min_price: f64,
     max_price: f64,
-    sensitivity: f64, // FIXED: was sensitvity
+    sensitivity: f64,
 ) {
     let purchases = query("SELECT COALESCE(SUM(quantity), 0) as total_quantity FROM purchases WHERE product_id = $1 AND completed_at > NOW() - ($2 || ' minutes')::interval")
         .bind(id)
-        .bind(interval)  // FIXED: was interval_minutes
+        .bind(interval)
         .fetch_one(pool)
         .await
         .unwrap();
@@ -60,19 +57,19 @@ pub async fn edit_price(
     let total_quantity_bought_in_time_period: i64 =
         purchases.try_get("total_quantity").unwrap_or(0);
 
-    // FIXED: Convert to f64 and handle division by zero
     let stock_f64 = stock as f64;
     let quantity_f64 = total_quantity_bought_in_time_period as f64;
 
-    let ratio = if quantity_f64 > 0.0 {
-        stock_f64 / quantity_f64
+    // FIXED: Demand / Supply ratio (higher demand relative to stock = higher price)
+    let ratio = if stock_f64 > 0.0 && quantity_f64 > 0.0 {
+        quantity_f64 / stock_f64
     } else {
-        stock_f64
+        0.0 // No purchases = no price change
     };
 
-    let new_price = baseline_price * (1.0 + (ratio - 1.0) * sensitivity);
+    let new_price = baseline_price * (1.0 + ratio * sensitivity);
 
-    // ADDED: Clamp between min and max
+    // Clamp between min and max
     let final_price = if new_price < min_price {
         min_price
     } else if new_price > max_price {
@@ -81,7 +78,7 @@ pub async fn edit_price(
         new_price
     };
 
-    // ADDED: Update database
+    // Update database
     query("UPDATE products SET current_price = $1, last_price_update = NOW(), updated_at = NOW() WHERE id = $2")
         .bind(final_price)
         .bind(id)
